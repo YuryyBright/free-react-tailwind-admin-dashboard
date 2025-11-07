@@ -14,12 +14,16 @@ import BarChart from "./pages/Charts/BarChart";
 import Calendar from "./pages/Calendar";
 import BasicTables from "./pages/Tables/BasicTables";
 import FormElements from "./pages/Forms/FormElements";
+import Accounts from "./pages/Accounts/Accounts";
 import Blank from "./pages/Blank";
 import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
+import MessagesStub from "./pages/Accounts/MessagesStub";
+import ProfileStub from "./pages/Accounts/ProfileStub";
 import Home from "./pages/Dashboard/Home";
 import { AuthProvider } from "./context/AuthContext";  // Додано: AuthProvider з попереднього шаблону
 import PrivateRoute from "./context/PrivateRoute";  // Додано: PrivateRoute з попереднього шаблону
+
 export default function App() {
   return (
     <>
@@ -30,7 +34,10 @@ export default function App() {
       {/* Захищені роути */}
       <Route element={<PrivateRoute><AppLayout /></PrivateRoute>}>
         <Route index path="/" element={<Home />} />
+        <Route path="/accounts" element={<Accounts />} />
         <Route path="/profile" element={<UserProfiles />} />
+        <Route path="/accounts/:id/messages" element={<MessagesStub />} />
+        <Route path="/profile/:id" element={<ProfileStub />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/blank" element={<Blank />} />
         <Route path="/form-elements" element={<FormElements />} />

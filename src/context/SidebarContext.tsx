@@ -26,13 +26,29 @@ export const useSidebar = () => {
 export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [activeItem, setActiveItem] = useState<string | null>(null);
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
 
+  // Завантажуємо збережений стан isExpanded з localStorage
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sidebarExpanded");
+      return saved !== null ? JSON.parse(saved) : true; // за замовчуванням розгорнуто
+    }
+    return true;
+  });
+
+  // Зберігаємо isExpanded при зміні
+  useEffect(() => {
+    if (!isMobile) {
+      localStorage.setItem("sidebarExpanded", JSON.stringify(isExpanded));
+    }
+  }, [isExpanded, isMobile]);
+
+  // Відстеження розміру екрану
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
@@ -44,14 +60,15 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
 
     handleResize();
     window.addEventListener("resize", handleResize);
-
     return () => {
       window.removeEventListener("resize", handleResize);
     };
   }, []);
 
   const toggleSidebar = () => {
-    setIsExpanded((prev) => !prev);
+    if (!isMobile) {
+      setIsExpanded((prev) => !prev);
+    }
   };
 
   const toggleMobileSidebar = () => {

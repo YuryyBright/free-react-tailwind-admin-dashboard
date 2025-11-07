@@ -3,6 +3,7 @@ layer(base);
 
 @import "tailwindcss";
 
+
 @custom-variant dark (&:is(.dark *));
 
 @theme {
@@ -775,4 +776,22 @@ span.flatpickr-weekday,
 
 .simplebar-scrollbar.simplebar-visible:before {
   @apply opacity-100;
+}
+@keyframes typing {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes blink {
+  50% {
+    border-color: transparent;
+  }
+}
+
+@utility animate-typing {
+  animation: typing 2s steps(45, end) forwards, blink 0.8s step-end infinite;
 }

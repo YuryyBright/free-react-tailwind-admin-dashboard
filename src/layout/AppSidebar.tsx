@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
-
+import { Link, useLocation } from "react-router-dom";
 // Assume these icons are imported from an icon library
 import {
   BoxCubeIcon,
@@ -17,6 +16,8 @@ import {
 } from "../icons";
 import { useSidebar } from "../context/SidebarContext";
 import SidebarWidget from "./SidebarWidget";
+// Add new icons if needed; assuming you have or can import these
+import { HomeIcon, MessageIcon, AnalyzeIcon, AccountIcon } from "../icons"; // Replace with actual imports
 
 type NavItem = {
   name: string;
@@ -27,9 +28,36 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   {
-    icon: <GridIcon />,
-    name: "Dashboard",
-    subItems: [{ name: "Ecommerce", path: "/", pro: false }],
+    icon: <HomeIcon />,
+    name: "Main",
+    path: "/", // or "/home" if preferred
+  },
+  {
+    icon: <AccountIcon />,
+    name: "Accounts",
+    subItems: [
+      { name: "List of Accounts", path: "/accounts", pro: false }, // Main list of accounts
+      { name: "Groups", path: "/accounts/groups", pro: false }, // Aggregated or searchable groups across accounts
+      { name: "Integrations", path: "/accounts/integrations", pro: false },
+    ],
+  },
+  {
+    icon: <MessageIcon />,
+    name: "Messages",
+    subItems: [
+      { name: "All Messages", path: "/messages/all", pro: false }, // View all incoming messages across accounts/groups
+      { name: "Groups Overview", path: "/messages/groups", pro: false }, // Overview of groups and their messages
+      { name: "Archive", path: "/messages/archive", new: true },
+    ],
+  },
+  {
+    icon: <AnalyzeIcon />,
+    name: "AI Analyzer",
+    subItems: [
+      { name: "Analyze Messages", path: "/analyzer/messages", pro: false },
+      { name: "Reports", path: "/analyzer/reports", pro: false },
+      { name: "Insights", path: "/analyzer/insights", new: true },
+    ],
   },
   {
     icon: <CalenderIcon />,
@@ -95,7 +123,6 @@ const othersItems: NavItem[] = [
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const location = useLocation();
-
   const [openSubmenu, setOpenSubmenu] = useState<{
     type: "main" | "others";
     index: number;
@@ -104,8 +131,6 @@ const AppSidebar: React.FC = () => {
     {}
   );
   const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  // const isActive = (path: string) => location.pathname === path;
   const isActive = useCallback(
     (path: string) => location.pathname === path,
     [location.pathname]
@@ -129,7 +154,6 @@ const AppSidebar: React.FC = () => {
         }
       });
     });
-
     if (!submenuMatched) {
       setOpenSubmenu(null);
     }
@@ -178,7 +202,7 @@ const AppSidebar: React.FC = () => {
               }`}
             >
               <span
-                className={`menu-item-icon-size  ${
+                className={`menu-item-icon-size ${
                   openSubmenu?.type === menuType && openSubmenu?.index === index
                     ? "menu-item-icon-active"
                     : "menu-item-icon-inactive"
@@ -285,16 +309,16 @@ const AppSidebar: React.FC = () => {
 
   return (
     <aside
-      className={`fixed mt-16 flex flex-col lg:mt-0 top-0 px-5 left-0 bg-white dark:bg-gray-900 dark:border-gray-800 text-gray-900 h-screen transition-all duration-300 ease-in-out z-50 border-r border-gray-200 
-        ${
-          isExpanded || isMobileOpen
-            ? "w-[290px]"
-            : isHovered
-            ? "w-[290px]"
-            : "w-[90px]"
-        }
-        ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
-        lg:translate-x-0`}
+      className={`fixed mt-16 flex flex-col lg:mt-0 top-0 px-5 left-0 bg-white dark:bg-gray-900 dark:border-gray-800 text-gray-900 h-screen transition-all duration-300 ease-in-out z-50 border-r border-gray-200
+      ${
+        isExpanded || isMobileOpen
+          ? "w-[290px]"
+          : isHovered
+          ? "w-[290px]"
+          : "w-[90px]"
+      }
+      ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
+      lg:translate-x-0`}
       onMouseEnter={() => !isExpanded && setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >

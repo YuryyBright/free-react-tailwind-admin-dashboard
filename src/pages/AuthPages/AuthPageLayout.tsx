@@ -15,13 +15,16 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               <img
                 width={231}
                 height={48}
-                src="/images/logo/auth-logo.svg"
+                src="/images/logo/logo-icon1.png"
                 alt="Logo"
               />
             </Link>
-            <p className="text-center text-gray-400 dark:text-white/60">
-              Free and Open-Source Tailwind CSS Admin Dashboard
-            </p>
+<p className="text-center text-gray-400 dark:text-white/60 text-lg font-medium animate-typing overflow-hidden whitespace-nowrap border-r-4 border-gray-400 pr-2 max-w-fit mx-auto">
+  Ваш шлях до простоти.
+</p>
+
+
+
           </div>
         </div>
       </div>
