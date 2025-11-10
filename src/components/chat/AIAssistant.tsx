@@ -6,14 +6,6 @@ import { IconButton } from './ui/IconButton';
 import { AIMessage, Message } from './types';
 import { useMessageContext } from '../../context/MessageContext';
 
-const mockAIStream = async function* (text: string) {
-  const words = text.split(' ');
-  for (let i = 0; i <= words.length; i++) {
-    await new Promise(r => setTimeout(r, 40));
-    yield words.slice(0, i).join(' ') + (i < words.length ? '...' : '');
-  }
-};
-
 export const AIAssistant: React.FC<{
   isOpen: boolean;
   onClose: () => void;
@@ -29,16 +21,6 @@ export const AIAssistant: React.FC<{
   useEffect(() => scrollToBottom(), [aiMessages, streamingText]);
 
   const currentMessages = state.selectedChatId ? state.messages[state.selectedChatId] || [] : [];
-
-  const extractThemes = (msgs: Message[]): string[] => {
-    const text = msgs.map(m => m.content || '').join(' ').toLowerCase();
-    const map: Record<string, string[]> = {
-      'проект': ['проект', 'таск', 'завдання'],
-      'зустріч': ['зустріч', 'дзвінок', 'мітинг'],
-      'дедлайн': ['дедлайн', 'термін', 'сьогодні', 'завтра'],
-    };
-    return Object.keys(map).filter(t => map[t].some(k => text.includes(k))).slice(0, 3);
-  };
 
   const analyze = async (type: 'all' | 'new' | 'selected') => {
     let target: Message[] = [];
@@ -60,37 +42,69 @@ export const AIAssistant: React.FC<{
     setAiMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
 
-    const incoming = target.filter(m => !m.isOutgoing).length;
-    const unread = target.filter(m => !m.isRead && !m.isOutgoing).length;
-    const urgent = target.filter(m => !m.isOutgoing && !m.isRead && /терміново|швидко|сьогодні|до \d{2}:\d{2}/i.test(m.content || '')).length;
+    // Формуємо промпт для Ollama
+    const prompt = `Проаналізуй наступні повідомлення з чату. Надати статистику (вхідні, непрочитані, термінові), теми, рекомендації. Формат: markdown.
+    
+Повідомлення:
+${target.map((m, i) => `${i+1}. ${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.content || '[медіа]'}`).join('\n')}`;
 
-    const response = `**Аналіз ${target.length} повідомлень**
-
-**Статистика:**
-• Вхідних: ${incoming}
-• Непрочитаних: ${unread} ${unread > 0 ? 'Warning' : 'Checkmark'}
-
-**Теми:** ${extractThemes(target).join(', ') || 'немає чітких'}
-
-${urgent > 0 ? `**${urgent} термінових повідомлень!**\n` : ''}
-${target.some(m => m.type === 'document') ? 'Є документи\n' : ''}
-${target.some(m => m.type === 'image') ? 'Є фото' : ''}
-
-**Рекомендація:** ${unread > 2 ? 'Переглянь нові повідомлення.' : 'Все під контролем.'}`;
-
-    await streamResponse(response);
+    await streamOllamaResponse(prompt);
     setIsLoading(false);
   };
 
-  const streamResponse = async (text: string) => {
+  const streamOllamaResponse = async (prompt: string) => {
     setStreamingText('');
-    for await (const chunk of mockAIStream(text)) {
-      setStreamingText(chunk);
+    let accumulatedText = '';
+
+    try {
+      const response = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3', // Замініть на вашу модель в Ollama, наприклад 'llama3' або 'mistral'
+          prompt: prompt,
+          stream: true,
+        }),
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim());
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.response) {
+              accumulatedText += data.response;
+              setStreamingText(accumulatedText + '...');
+            }
+            if (data.done) {
+              break;
+            }
+          } catch (e) {
+            console.error('Error parsing JSON:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Ollama error:', error);
+      accumulatedText = 'Помилка зʼєднання з Ollama. Перевірте, чи запущено сервер.';
     }
+
+    setStreamingText(accumulatedText);
+
     const final: AIMessage = {
       id: `ai-${Date.now()}`,
       role: 'assistant',
-      content: text,
+      content: accumulatedText,
       timestamp: new Date(),
     };
     setAiMessages(prev => [...prev, final]);
@@ -107,13 +121,11 @@ ${target.some(m => m.type === 'image') ? 'Є фото' : ''}
     setInputValue('');
     setIsLoading(true);
 
-    const lower = inputValue.toLowerCase();
-    let reply = '';
-    if (lower.includes('підсумок')) reply = 'Коротко: обговорили проєкт, заплановано зустріч на пʼятницю, 3 термінові повідомлення.';
-    else if (lower.includes('термінове')) reply = 'Warning Знайдено 3 термінові: "до 15:00", "підписати", "дзвінок 14:30".';
-    else reply = `Ви запитали: "${inputValue}".\n\nЦе демо AI. У реальності тут буде відповідь від Grok/OpenAI.`;
+    // Формуємо промпт з контекстом чату, якщо потрібно
+    const context = currentMessages.slice(-5).map(m => `${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.content || '[медіа]'}`).join('\n');
+    const prompt = `Контекст чату:\n${context}\n\nЗапит користувача: ${inputValue}\n\nВідповідай українською.`;
 
-    await streamResponse(reply);
+    await streamOllamaResponse(prompt);
     setIsLoading(false);
   };
 
