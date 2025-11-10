@@ -1,11 +1,9 @@
-interface TabsProps {
+export const Tabs: React.FC<{
   activeTab: 'messages' | 'gallery' | 'documents';
   onTabChange: (tab: 'messages' | 'gallery' | 'documents') => void;
-}
-
-export default function Tabs({ activeTab, onTabChange }: TabsProps) {
+}> = ({ activeTab, onTabChange }) => {
   return (
-    <div className="flex border-b border-gray-200 dark:border-gray-700">
+    <div className="flex border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
       {(['messages', 'gallery', 'documents'] as const).map((tab) => (
         <button
           key={tab}
@@ -23,4 +21,4 @@ export default function Tabs({ activeTab, onTabChange }: TabsProps) {
       ))}
     </div>
   );
-}
+};
