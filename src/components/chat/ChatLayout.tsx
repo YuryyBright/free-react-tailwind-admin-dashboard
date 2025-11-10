@@ -18,17 +18,14 @@ export default function ChatApp() {
   const [inputValue, setInputValue] = useState('');
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
 
-  const selectedChat = mockChats.find(c => c.id === selectedChatId) || mockChats[0];
+  const selectedChat = (state.chats || mockChats).find(c => c.id === selectedChatId) || mockChats[0];
   const currentMessages = selectedChatId ? messages[selectedChatId] || [] : [];
 
   useEffect(() => {
-    if (selectedChatId) {
-      dispatch({ type: 'SET_MESSAGES', payload: { chatId: selectedChatId, messages: generateMessages(selectedChatId) } });
-    }
-  }, [selectedChatId, dispatch]);
-
-  useEffect(() => {
     dispatch({ type: 'SET_CHATS', payload: mockChats });
+    mockChats.forEach(chat => {
+      dispatch({ type: 'SET_MESSAGES', payload: { chatId: chat.id, messages: generateMessages(chat.id) } });
+    });
   }, [dispatch]);
 
   const handleSend = () => {
@@ -53,7 +50,7 @@ export default function ChatApp() {
     <>
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
         <Sidebar
-          chats={mockChats}
+          chats={state.chats || mockChats}
           selectedChat={selectedChat}
           searchQuery={searchQuery}
           onSearchChange={q => dispatch({ type: 'SET_SEARCH', payload: q })}

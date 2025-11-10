@@ -1,5 +1,5 @@
 // src/components/MessagesArea.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { MessageItem } from './MessageItem';
 import { Message, MessageStatus } from './types';
 import { Button } from './ui/Button';
@@ -12,7 +12,12 @@ export const MessagesArea: React.FC<{
   const { state, dispatch } = useMessageContext();
   const { selectedChatId, selectedMessageIds } = state;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const prevHeightRef = useRef(0);
+  const [visibleCount, setVisibleCount] = useState(5);
   const [showScrollToUnread, setShowScrollToUnread] = useState(false);
+
+  const visibleMessages = messages.slice(messages.length - visibleCount);
 
   const unreadIds = messages
     .filter(m => !m.isOutgoing && !m.isRead)
@@ -24,7 +29,12 @@ export const MessagesArea: React.FC<{
   const scrollToFirstUnread = () => {
     if (unreadIds.length === 0) return;
     const el = document.getElementById(unreadIds[0]);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      // Якщо непрочитане не в visible, завантажити більше
+      setVisibleCount(messages.length);
+    }
   };
 
   useEffect(() => {
@@ -75,6 +85,39 @@ export const MessagesArea: React.FC<{
     return () => scrollRef.current?.removeEventListener('scroll', handleScroll);
   }, [unreadIds.length]);
 
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && visibleCount < messages.length) {
+          prevHeightRef.current = scrollRef.current?.scrollHeight || 0;
+          setVisibleCount(prev => Math.min(prev + 5, messages.length));
+        }
+      },
+      { threshold: 0.1, root: scrollRef.current }
+    );
+
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+
+    return () => observer.disconnect();
+  }, [visibleCount, messages.length]);
+
+  // Adjust scroll position after loading more
+  useLayoutEffect(() => {
+    if (scrollRef.current && visibleCount > 5) { // After initial
+      const newHeight = scrollRef.current.scrollHeight;
+      const heightDiff = newHeight - prevHeightRef.current;
+      scrollRef.current.scrollTop += heightDiff;
+    }
+  }, [visibleCount]);
+
+  // Initial scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current && visibleCount === 5) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const handleMarkAllAsRead = () => {
     if (!selectedChatId) return;
     dispatch({
@@ -123,30 +166,34 @@ export const MessagesArea: React.FC<{
       )}
 
       {/* Повідомлення */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900 scrollbar-thin">
-        {messages.map((msg, i) => {
-          const showAvatar = i === 0 || messages[i - 1].isOutgoing !== msg.isOutgoing;
-          const isUnread = !msg.isOutgoing && !msg.isRead;
-          const isSelected = selectedMessageIds.has(msg.id);
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900 scrollbar-thin flex flex-col-reverse">
+        <div className="flex flex-col">
+          {visibleMessages.map((msg, i) => {
+            // Since slice(-n), [0] is oldest visible, [end] newest
+            const showAvatar = i === 0 || visibleMessages[i - 1].isOutgoing !== msg.isOutgoing;
+            const isUnread = !msg.isOutgoing && !msg.isRead;
+            const isSelected = selectedMessageIds.has(msg.id);
 
-          return (
-            <div
-              key={msg.id}
-              id={msg.id}
-              className={`mb-3 transition-all ${isUnread ? 'bg-blue-50/70 dark:bg-blue-900/30 rounded-lg p-2 -mx-2' : ''}`}
-            >
-              <MessageItem
-                message={msg}
-                showAvatar={showAvatar}
-                onStatusChange={handleStatusChange}
-                isUnread={isUnread}
-                isSelected={isSelected}
-                onToggleSelect={() => handleToggleSelect(msg.id)}
-                onToggleBookmark={() => handleToggleBookmark(msg.id)}
-              />
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={msg.id}
+                id={msg.id}
+                className={`mb-3 transition-all ${isUnread ? 'bg-blue-50/70 dark:bg-blue-900/30 rounded-lg p-2 -mx-2' : ''}`}
+              >
+                <MessageItem
+                  message={msg}
+                  showAvatar={showAvatar}
+                  onStatusChange={handleStatusChange}
+                  isUnread={isUnread}
+                  isSelected={isSelected}
+                  onToggleSelect={() => handleToggleSelect(msg.id)}
+                  onToggleBookmark={() => handleToggleBookmark(msg.id)}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div ref={loadMoreRef} style={{ height: '10px' }} />
       </div>
 
       {/* Підказка про вибір */}

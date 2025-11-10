@@ -15,9 +15,12 @@ export const Sidebar: React.FC<{
   showSidebar: boolean;
   onToggleSidebar: () => void;
 }> = ({ chats, selectedChat, searchQuery, onSearchChange, showSidebar, onToggleSidebar }) => {
-  const { dispatch } = useMessageContext();
+  const { state, dispatch } = useMessageContext();
 
-  const totalUnread = chats.reduce((sum, c) => sum + c.unreadCount, 0);
+  const totalUnread = chats.reduce((sum, c) => {
+    const msgs = state.messages[c.id] || [];
+    return sum + msgs.filter(m => !m.isOutgoing && !m.isRead).length;
+  }, 0);
 
   const filteredChats = chats.filter(chat =>
     chat.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -54,39 +57,43 @@ export const Sidebar: React.FC<{
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {filteredChats.map((chat) => (
-          <div
-            key={chat.id}
-            onClick={() => handleSelectChat(chat)}
-            className={`flex items-center gap-3 p-3 cursor-pointer transition ${
-              selectedChat.id === chat.id
-                ? 'bg-blue-50 dark:bg-blue-900/20'
-                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-          >
-            <Avatar src={chat.avatar} alt={chat.name} isOnline={chat.isOnline} size="lg" />
+        {filteredChats.map((chat) => {
+          const unread = (state.messages[chat.id] || []).filter(m => !m.isOutgoing && !m.isRead).length;
 
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-baseline">
-                <h3 className="font-medium truncate">{chat.name}</h3>
-                <span className="text-xs text-gray-500">
-                  {chat.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+          return (
+            <div
+              key={chat.id}
+              onClick={() => handleSelectChat(chat)}
+              className={`flex items-center gap-3 p-3 cursor-pointer transition ${
+                selectedChat.id === chat.id
+                  ? 'bg-blue-50 dark:bg-blue-900/20'
+                  : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              <Avatar src={chat.avatar} alt={chat.name} isOnline={chat.isOnline} size="lg" />
+
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-baseline">
+                  <h3 className="font-medium truncate">{chat.name}</h3>
+                  <span className="text-xs text-gray-500">
+                    {chat.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+                  {chat.isTyping ? (
+                    <span className="italic">печатає...</span>
+                  ) : (
+                    chat.lastMessage
+                  )}
+                </p>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
-                {chat.isTyping ? (
-                  <span className="italic">печатає...</span>
-                ) : (
-                  chat.lastMessage
-                )}
-              </p>
-            </div>
 
-            {chat.unreadCount > 0 && (
-              <Badge variant="primary">{chat.unreadCount}</Badge>
-            )}
-          </div>
-        ))}
+              {unread > 0 && (
+                <Badge variant="primary">{unread}</Badge>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
