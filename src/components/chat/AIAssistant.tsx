@@ -5,7 +5,6 @@ import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
 import { AIMessage, Message } from './types';
 import { useMessageContext } from '../../context/MessageContext';
-import axios from 'axios';
 
 export const AIAssistant: React.FC<{
   isOpen: boolean;
@@ -19,7 +18,7 @@ export const AIAssistant: React.FC<{
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Скасування запиту
-  const cancelTokenRef = useRef<axios.CancelTokenSource | null>(null);
+  const cancelTokenRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -33,7 +32,7 @@ export const AIAssistant: React.FC<{
   useEffect(() => {
     return () => {
       if (cancelTokenRef.current) {
-        cancelTokenRef.current.cancel('Компонент розмонтовано');
+        cancelTokenRef.current.abort('Компонент розмонтовано');
       }
     };
   }, []);
@@ -57,77 +56,111 @@ export const AIAssistant: React.FC<{
   const streamOllamaResponse = async (prompt: string) => {
     setStreamingText('');
     let accumulatedText = '';
+    let buffer = '';
 
     // Скасовуємо попередній запит, якщо є
     if (cancelTokenRef.current) {
-      cancelTokenRef.current.cancel('Новий запит');
+      cancelTokenRef.current.abort('Новий запит');
     }
 
-    const source = axios.CancelToken.source();
-    cancelTokenRef.current = source;
+    const controller = new AbortController();
+    cancelTokenRef.current = controller;
+
+    const timeoutId = setTimeout(() => {
+      controller.abort('Таймаут запиту');
+    }, 180000); // 3 хвилини
 
     try {
       console.log('Відправляємо запит до Ollama...');
       console.log('Prompt:', prompt.substring(0, 200) + '...');
 
-      await axios.post(
-        '/api/generate',
-        {
-          model: 'qwen2:7b-instruct',
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'llama3',
           prompt: prompt,
           stream: true,
-        },
-        {
-          responseType: 'stream',
-          cancelToken: source.token,
-          timeout: 180000, // 3 хвилини
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          onDownloadProgress: progressEvent => {
-            const data = progressEvent.event.target.responseText;
-            const newLines = data
-              .split('\n')
-              .filter((line: string) => line.trim() && line.startsWith('data:'));
+        }),
+        signal: controller.signal,
+      });
 
-            for (const rawLine of newLines) {
-              try {
-                const jsonStr = rawLine.replace(/^data:\s*/, '');
-                if (jsonStr === '[DONE]') continue;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-                const json = JSON.parse(jsonStr);
-                if (json.response) {
-                  accumulatedText += json.response;
-                  setStreamingText(accumulatedText);
-                }
-                if (json.done) {
-                  break;
-                }
-              } catch (e) {
-                // Ігноруємо помилки парсингу окремих рядків
-                console.warn('Помилка парсингу рядка:', rawLine);
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine) {
+            try {
+              const json = JSON.parse(trimmedLine);
+              if (json.response) {
+                accumulatedText += json.response;
+                setStreamingText(accumulatedText);
               }
+              if (json.done) {
+                // Опціонально: можна завершити, але продовжуємо читати
+              }
+            } catch (e) {
+              console.warn('Помилка парсингу рядка:', line);
             }
-          },
+          }
         }
-      );
+      }
+
+      // Обробити залишок буфера після завершення
+      const finalFlush = decoder.decode();
+      if (finalFlush) {
+        buffer += finalFlush;
+      }
+      if (buffer.trim()) {
+        try {
+          const json = JSON.parse(buffer);
+          if (json.response) {
+            accumulatedText += json.response;
+            setStreamingText(accumulatedText);
+          }
+        } catch (e) {
+          console.warn('Помилка парсингу фінального буфера:', buffer);
+        }
+      }
     } catch (error) {
-      if (axios.isCancel(error)) {
+      let errorMessage = 'Помилка з’єднання з Ollama. Перевірте, чи запущено сервер.';
+      if (error.name === 'AbortError') {
         console.log('Запит скасовано:', error.message);
-        if (error.message !== 'Новий запит' && error.message !== 'Компонент розмонтовано') {
-          accumulatedText = 'Запит скасовано через таймаут або вручну.';
+        if (error.message === 'Таймаут запиту') {
+          errorMessage = 'Таймаут запиту. Ollama не відповідає.';
+        } else if (error.message !== 'Новий запит' && error.message !== 'Компонент розмонтовано') {
+          errorMessage = 'Запит скасовано через таймаут або вручну.';
+        } else {
+          // Для 'Новий запит' або 'Компонент розмонтовано' не встановлюємо помилку
+          return;
         }
       } else {
         console.error('Помилка Ollama:', error);
-        accumulatedText =
-          error.code === 'ECONNABORTED'
-            ? 'Таймаут запиту. Ollama не відповідає.'
-            : 'Помилка з’єднання з Ollama. Перевірте, чи запущено сервер.';
       }
+      accumulatedText = errorMessage;
     } finally {
+      clearTimeout(timeoutId);
       // Завершуємо потік
-      setStreamingText(accumulatedText);
-
       if (accumulatedText.trim()) {
         const final: AIMessage = {
           id: `ai-${Date.now()}`,
@@ -173,11 +206,6 @@ export const AIAssistant: React.FC<{
 Визнач основні теми, підтеми та рекомендації.
 
 Формат відповіді: markdown українською мовою.
-Структура:
-- **Статистика**
-- **Виявлені повідомлення** (тільки критичні)
-- **Теми та підтеми**
-- **Рекомендації**
 
 Повідомлення:
 ${target
@@ -206,7 +234,7 @@ ${context}
 Запит користувача: ${inputValue}
 
 Аналізуй з акцентом на військову тематику: підготовка до дій, місця зберігання техніки, координація тощо.
-Якщо релевантно — покажи виявлені повідомлення з цитатами.
+Якщо релевантно — покажи виявлені повідомлення.
 Відповідай виключно українською мовою, використовуючи markdown.`;
 
     await streamOllamaResponse(prompt);
