@@ -17,11 +17,11 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/ollama': {
+      '/api': {
         target: 'http://localhost:11434',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/ollama/, '')
-      }
-    }
-  }
+        rewrite: path => path.replace(/^\/api/, '/api'),
+      },
+    },
+  },
 });

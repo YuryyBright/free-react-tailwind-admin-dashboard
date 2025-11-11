@@ -46,7 +46,7 @@ export const AIAssistant: React.FC<{
 
 Формат відповіді: markdown українською мовою. Структура: 
 - **Статистика**
-- **Виявлені повідомлення** (перелік з цитатами)
+- **Виявлені повідомлення** (тільки критичні на які треба звернути увагу і відповіді на ці повідомлення)
 - **Теми та підтеми**
 - **Рекомендації**
 
@@ -59,7 +59,7 @@ ${target.map((m, i) => `${i+1}. ${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.cont
   const streamOllamaResponse = async (prompt: string) => {
   setStreamingText('');
   let accumulatedText = '';
-  const timeoutDuration = 120000; // Збільште це значення, наприклад, до 120000 (2 хвилини) або більше
+  const timeoutDuration = 60000; // Збільште це значення, наприклад, до 120000 (2 хвилини) або більше
 
   const controller = new AbortController();
   const signal = controller.signal;
@@ -72,11 +72,11 @@ ${target.map((m, i) => `${i+1}. ${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.cont
   try {
     console.log('Starting fetch to Ollama...');
     console.log('Prompt:', prompt);
-    const response = await fetch('http://localhost:11434/api/generate', {
+    const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama3', // Замініть на вашу модель
+        model: 'qwen2:7b-instruct', // Замініть на вашу модель
         prompt: prompt,
         stream: true,
       }),
