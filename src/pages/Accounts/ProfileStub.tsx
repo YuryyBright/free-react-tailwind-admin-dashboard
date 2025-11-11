@@ -8,7 +8,7 @@ export default function ProfileStub() {
 
   return (
     <div>
-      <PageMeta title={`Профіль користувача #${id}`} />
+      <PageMeta title={`Профіль користувача #${id}`} description=""/>
       <PageBreadcrumb pageTitle={`Профіль #${id}`} />
 
       <div className="min-h-screen rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-white/[0.03]">

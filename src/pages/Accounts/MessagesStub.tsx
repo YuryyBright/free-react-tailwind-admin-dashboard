@@ -10,7 +10,7 @@ export default function MessagesStub() {
   return (
     <div>
 
-      <PageMeta title={`Чат з користувачем #${id}`} />
+      <PageMeta title={`Чат з користувачем #${id}`} description="" />
       <PageBreadcrumb pageTitle={`Повідомлення акаунта ${id}`} />
 
      <MessageProvider>       <ChatApp userId={id!} /> </MessageProvider>
