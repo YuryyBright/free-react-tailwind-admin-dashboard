@@ -28,6 +28,7 @@ export default function App() {
   return (
     <>
 <Router>
+  
   <AuthProvider>
     <ScrollToTop />
     <Routes>

@@ -13,6 +13,7 @@ export const MessageItem: React.FC<{
   isUnread?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (id: string) => void;
+  readonly: boolean;
 }> = ({ message, showAvatar, onStatusChange, onToggleBookmark, isUnread, isSelected, onToggleSelect }) => {
   const [showMenu, setShowMenu] = useState(false);
   const isOutgoing = message.isOutgoing;

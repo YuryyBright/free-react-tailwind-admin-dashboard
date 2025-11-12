@@ -10,7 +10,8 @@ import CallModal from './CallModall';
 import { useMessageContext } from '../../context/MessageContext';
 import { mockChats } from './mockData';
 import { generateMessages } from './types';
-export default function ChatApp() {
+
+export default function ChatApp({ readOnly = false }: { readOnly?: boolean }) {
   const { state, dispatch } = useMessageContext();
   const { selectedChatId, messages, searchQuery } = state;
   const [showSidebar, setShowSidebar] = useState(true);
@@ -23,13 +24,26 @@ export default function ChatApp() {
 
   useEffect(() => {
     dispatch({ type: 'SET_CHATS', payload: mockChats });
+
     mockChats.forEach(chat => {
-      dispatch({ type: 'SET_MESSAGES', payload: { chatId: chat.id, messages: generateMessages(chat.id) } });
+      const generated = generateMessages(chat.id);
+
+      // У режимі readOnly — всі повідомлення спочатку НЕ прочитані
+      if (readOnly) {
+        generated.forEach(msg => {
+          msg.isRead = false;
+        });
+      }
+
+      dispatch({
+        type: 'SET_MESSAGES',
+        payload: { chatId: chat.id, messages: generated },
+      });
     });
-  }, [dispatch]);
+  }, [dispatch, readOnly]);
 
   const handleSend = () => {
-    if (!inputValue.trim() || !selectedChatId) return;
+    if (!inputValue.trim() || !selectedChatId || readOnly) return;
     const newMessage = {
       id: `msg-${Date.now()}`,
       type: 'text' as const,
@@ -44,7 +58,7 @@ export default function ChatApp() {
     setInputValue('');
   };
 
-  const unreadCount = currentMessages.filter(m => !m.isOutgoing && !m.isRead).length;
+  const unreadCount = currentMessages.filter(m => !m.isRead).length;
 
   return (
     <>
@@ -63,27 +77,31 @@ export default function ChatApp() {
             chat={selectedChat}
             unreadCount={unreadCount}
             onToggleSidebar={() => setShowSidebar(v => !v)}
-            onCall={setCallType}
+            onCall={readOnly ? undefined : setCallType} // блокуємо дзвінки в readOnly
           />
 
           <Tabs activeTab={activeTab} onTabChange={setActiveTab} />
 
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 min-w-0">
-              {activeTab === 'messages' && <MessagesArea messages={currentMessages} />}
+              {activeTab === 'messages' && (
+                <MessagesArea messages={currentMessages} readOnly={readOnly} />
+              )}
               {/* інші таби */}
             </div>
 
-            {activeTab === 'messages' && <AnalysisSidebar />}
+            {activeTab === 'messages' && !readOnly && <AnalysisSidebar />}
           </div>
 
-          {activeTab === 'messages' && (
+          {/* Поле вводу тільки в звичайному режимі */}
+          {activeTab === 'messages' && !readOnly && (
             <InputArea value={inputValue} onChange={setInputValue} onSend={handleSend} />
           )}
         </div>
       </div>
 
-      {callType && (
+      {/* Дзвінки тільки в звичайному режимі */}
+      {!readOnly && callType && (
         <CallModal callType={callType} chat={selectedChat} onEndCall={() => setCallType(null)} />
       )}
     </>
