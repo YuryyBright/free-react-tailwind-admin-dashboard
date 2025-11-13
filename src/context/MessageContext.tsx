@@ -55,18 +55,22 @@ function reducer(state: State, action: Action): State {
       return { ...state, searchQuery: action.payload };
     case 'MARK_AS_READ':
       const { chatId, messageIds } = action.payload;
-      const updated = state.messages[chatId]?.map(m =>
+      const updatedMessages = state.messages[chatId]?.map(m =>
         messageIds.includes(m.id) ? { ...m, isRead: true } : m
       ) || [];
-      // оновлюємо unreadCount в чаті
-      const chat = state.chats.find(c => c.id === chatId);
-      if (chat) {
-        chat.unreadCount = Math.max(0, chat.unreadCount - messageIds.length);
-      }
+
+      const markedCount = messageIds.length;
+
+      const updatedChats = state.chats.map(chat =>
+        chat.id === chatId
+          ? { ...chat, unreadCount: Math.max(0, chat.unreadCount - markedCount) }
+          : chat
+      );
+
       return {
         ...state,
-        messages: { ...state.messages, [chatId]: updated },
-        chats: [...state.chats],
+        messages: { ...state.messages, [chatId]: updatedMessages },
+        chats: updatedChats,
       };
     case 'ADD_MESSAGE':
       const chatIdAdd = action.payload.isOutgoing

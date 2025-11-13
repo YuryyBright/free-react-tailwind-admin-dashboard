@@ -1,6 +1,5 @@
 // src/components/Sidebar.tsx
 import { Search, Menu } from 'lucide-react';
-import { Chat } from './types';
 import { IconButton } from '../ui/icon/IconButton';
 import { Input } from './ui/Input';
 import { Avatar } from './ui/Avatar';
@@ -8,26 +7,25 @@ import { Badge } from './ui/Badge';
 import { useMessageContext } from '../../context/MessageContext';
 
 export const Sidebar: React.FC<{
-  chats: Chat[];
-  selectedChat: Chat;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showSidebar: boolean;
   onToggleSidebar: () => void;
-}> = ({ chats, selectedChat, searchQuery, onSearchChange, showSidebar, onToggleSidebar }) => {
+}> = ({ searchQuery, onSearchChange, showSidebar, onToggleSidebar }) => {
   const { state, dispatch } = useMessageContext();
+  const { chats, messages, selectedChatId } = state;
 
-  const totalUnread = chats.reduce((sum, c) => {
-    const msgs = state.messages[c.id] || [];
-    return sum + msgs.filter(m => !m.isOutgoing && !m.isRead).length;
+  // Підрахунок загальних непрочитаних (тільки вхідні)
+  const totalUnread = chats.reduce((sum, chat) => {
+    return sum + chat.unreadCount;
   }, 0);
 
   const filteredChats = chats.filter(chat =>
     chat.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleSelectChat = (chat: Chat) => {
-    dispatch({ type: 'SELECT_CHAT', payload: chat.id });
+  const handleSelectChat = (chatId: string) => {
+    dispatch({ type: 'SELECT_CHAT', payload: chatId });
   };
 
   return (
@@ -58,14 +56,14 @@ export const Sidebar: React.FC<{
 
       <div className="flex-1 overflow-y-auto">
         {filteredChats.map((chat) => {
-          const unread = (state.messages[chat.id] || []).filter(m => !m.isOutgoing && !m.isRead).length;
+          const unread = chat.unreadCount;
 
           return (
             <div
               key={chat.id}
-              onClick={() => handleSelectChat(chat)}
+              onClick={() => handleSelectChat(chat.id)}
               className={`flex items-center gap-3 p-3 cursor-pointer transition ${
-                selectedChat.id === chat.id
+                selectedChatId === chat.id
                   ? 'bg-blue-50 dark:bg-blue-900/20'
                   : 'hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
@@ -83,7 +81,7 @@ export const Sidebar: React.FC<{
                   {chat.isTyping ? (
                     <span className="italic">печатає...</span>
                   ) : (
-                    chat.lastMessage
+                    chat.lastMessage || 'Немає повідомлень'
                   )}
                 </p>
               </div>

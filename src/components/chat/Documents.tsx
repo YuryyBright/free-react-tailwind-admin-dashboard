@@ -1,5 +1,4 @@
 import { FileText, Download } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
 import { IconButton } from '../ui/icon/IconButton';
 export const Documents: React.FC = () => {
   const docs = Array.from({ length: 10 }, (_, i) => ({

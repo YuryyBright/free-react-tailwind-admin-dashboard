@@ -6,82 +6,109 @@ import { Button } from './ui/Button';
 import { useMessageContext } from '../../context/MessageContext';
 import { ChevronDown } from 'lucide-react';
 
+const INITIAL_LOAD = 235;
+
 export const MessagesArea: React.FC<{
   messages: Message[];
   readOnly?: boolean;
 }> = ({ messages, readOnly = false }) => {
   const { state, dispatch } = useMessageContext();
   const { selectedChatId } = state;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const prevHeightRef = useRef(0);
-  const [visibleCount, setVisibleCount] = useState(30);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LOAD);
   const [showScrollToUnread, setShowScrollToUnread] = useState(false);
 
-  const visibleMessages = messages.slice(-visibleCount);
-
-  const unreadIds = messages.filter(m => !m.isRead).map(m => m.id);
+  const unreadMessages = messages.filter(m => !m.isRead);
+  const unreadIds = unreadMessages.map(m => m.id);
+  const firstUnreadIndex = messages.findIndex(m => !m.isRead);
   const hasScrolledToUnread = useRef(false);
 
-  // Скидаємо прапорець при зміні чату
-  useEffect(() => {
-    hasScrolledToUnread.current = false;
-  }, [selectedChatId]);
-
-  // Автоматична прокрутка до першого непрочитаного при завантаженні чату
+  // === Визначаємо, скільки завантажити при першому відкритті ===
   useLayoutEffect(() => {
-    if (hasScrolledToUnread.current) return;
+    if (messages.length === 0) return;
 
-    const firstUnreadId = unreadIds[0];
+    hasScrolledToUnread.current = false;
 
-    if (!firstUnreadId) {
-      // Немає непрочитаних — скролимо вниз
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
+    if (firstUnreadIndex === -1) {
+      // Немає непрочитаних → завантажуємо останні 235
+      setVisibleCount(Math.min(INITIAL_LOAD, messages.length));
+    } else {
+      // Є непрочитані → завантажуємо все до першого непрочитаного + 50 знизу
+      const loadUntil = Math.min(firstUnreadIndex + 50, messages.length);
+      setVisibleCount(loadUntil);
+    }
+  }, [messages.length, selectedChatId]);
+
+  // === Автоскрол до першого непрочитаного ===
+  useLayoutEffect(() => {
+    if (hasScrolledToUnread.current || !scrollRef.current) return;
+
+    if (firstUnreadIndex === -1) {
+      // Немає непрочитаних → скролимо вниз
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      hasScrolledToUnread.current = true;
       return;
     }
 
-    const el = document.getElementById(firstUnreadId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      hasScrolledToUnread.current = true;
-    } else {
-      // Якщо елемент ще не в DOM — підвантажуємо всі повідомлення
-      setVisibleCount(messages.length);
-    }
-  }, [messages.length, selectedChatId, unreadIds]);
-
-  // Функція ручного скролінгу (для кнопки)
-  const scrollToFirstUnread = () => {
-    if (unreadIds.length === 0) return;
     const el = document.getElementById(unreadIds[0]);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       hasScrolledToUnread.current = true;
-    } else {
-      setVisibleCount(messages.length);
+    }
+  }, [visibleCount, unreadIds]);
+
+  const scrollToFirstUnread = () => {
+    const el = document.getElementById(unreadIds[0]);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      hasScrolledToUnread.current = true;
     }
   };
 
-  // Автоматичне позначення як прочитаних
+  // === Напрямок скролу (звичайний: вгору = менше scrollTop) ===
+  const lastScrollTop = useRef(0);
+  const isScrollingDown = useRef(true);
+
   useEffect(() => {
-    if (!selectedChatId || unreadIds.length === 0) return;
+    const handleScroll = () => {
+      if (!scrollRef.current) return;
+      const current = scrollRef.current.scrollTop;
+      isScrollingDown.current = current > lastScrollTop.current;
+      lastScrollTop.current = current;
+    };
+    const el = scrollRef.current;
+    el?.addEventListener('scroll', handleScroll);
+    return () => el?.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // === IntersectionObserver: читаємо ТІЛЬКИ при скролі вниз або при першому відкритті ===
+  useEffect(() => {
+    if (!selectedChatId || unreadIds.length === 0 || readOnly) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries
+        const visibleIds = entries
           .filter(e => e.isIntersecting)
           .map(e => e.target.id);
 
-        if (visible.length > 0) {
+        if (visibleIds.length === 0) return;
+
+        const shouldMarkRead = isScrollingDown.current || !hasScrolledToUnread.current;
+
+        if (shouldMarkRead) {
           dispatch({
             type: 'MARK_AS_READ',
-            payload: { chatId: selectedChatId, messageIds: visible },
+            payload: { chatId: selectedChatId, messageIds: visibleIds },
           });
         }
       },
-      { root: scrollRef.current, threshold: 0.8 }
+      {
+        root: scrollRef.current,
+        threshold: 0.8,
+      }
     );
 
     unreadIds.forEach(id => {
@@ -90,29 +117,28 @@ export const MessagesArea: React.FC<{
     });
 
     return () => observer.disconnect();
-  }, [unreadIds, selectedChatId, dispatch]);
+  }, [unreadIds, selectedChatId, dispatch, readOnly]);
 
-  // Показ кнопки "Прокрутити до нових"
+  // === Плаваюча кнопка "вниз" ===
   useEffect(() => {
     const handleScroll = () => {
       if (!scrollRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
-      setShowScrollToUnread(unreadIds.length > 0 && !isNearBottom);
+      const nearBottom = scrollHeight - scrollTop - clientHeight < 400;
+      setShowScrollToUnread(unreadIds.length > 0 && !nearBottom);
     };
-
     scrollRef.current?.addEventListener('scroll', handleScroll);
     handleScroll();
     return () => scrollRef.current?.removeEventListener('scroll', handleScroll);
   }, [unreadIds.length]);
 
-  // Infinite scroll
+  // === Infinite scroll: підвантаження старих ===
   useEffect(() => {
     const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting && visibleCount < messages.length) {
+      ([entry]) => {
+        if (entry.isIntersecting && visibleCount < messages.length) {
           prevHeightRef.current = scrollRef.current?.scrollHeight || 0;
-          setVisibleCount(prev => Math.min(prev + 30, messages.length));
+          setVisibleCount(prev => Math.min(prev + 100, messages.length));
         }
       },
       { threshold: 0.1, root: scrollRef.current }
@@ -122,36 +148,14 @@ export const MessagesArea: React.FC<{
     return () => observer.disconnect();
   }, [visibleCount, messages.length]);
 
-  // Збереження позиції при підвантаженні старих повідомлень + повторна перевірка скролінгу до непрочитаного
+  // === Збереження позиції при підвантаженні ===
   useLayoutEffect(() => {
-    if (!scrollRef.current) return;
+    if (!scrollRef.current || visibleCount <= INITIAL_LOAD || prevHeightRef.current === 0) return;
 
-    // Зберігаємо позицію при підвантаженні старих
-    if (visibleCount > 30 && prevHeightRef.current > 0) {
-      const newHeight = scrollRef.current.scrollHeight;
-      const diff = newHeight - prevHeightRef.current;
-      scrollRef.current.scrollTop += diff;
-    }
-
-    // Якщо ще не скролили до непрочитаного — спробуємо ще раз (після підвантаження)
-    if (!hasScrolledToUnread.current && unreadIds.length > 0) {
-      const firstUnreadId = unreadIds[0];
-      const el = document.getElementById(firstUnreadId);
-      if (el) {
-        setTimeout(() => {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          hasScrolledToUnread.current = true;
-        }, 100);
-      }
-    }
+    const newHeight = scrollRef.current.scrollHeight;
+    const diff = newHeight - prevHeightRef.current;
+    scrollRef.current.scrollTop += diff;
   }, [visibleCount]);
-
-  // Початкова прокрутка вниз (якщо немає непрочитаних)
-  useEffect(() => {
-    if (scrollRef.current && visibleCount === 30 && unreadIds.length === 0) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [visibleCount, unreadIds.length]);
 
   const handleMarkAllAsRead = () => {
     if (!selectedChatId) return;
@@ -161,9 +165,11 @@ export const MessagesArea: React.FC<{
     });
   };
 
+  const visibleMessages = messages.slice(0, visibleCount);
+
   return (
     <div className="flex flex-col h-full relative">
-      {/* Кнопка "Прочитати всі" + "Прокрутити до нових" */}
+      {/* Кнопки зверху */}
       {unreadIds.length > 0 && (
         <div className="sticky top-0 z-10 p-3 bg-gradient-to-b from-blue-50 to-transparent dark:from-blue-900/30 flex justify-center gap-3">
           <Button onClick={handleMarkAllAsRead} variant="primary" size="sm">
@@ -175,7 +181,7 @@ export const MessagesArea: React.FC<{
         </div>
       )}
 
-      {/* Плаваюча кнопка прокрутки */}
+      {/* Плаваюча кнопка */}
       {showScrollToUnread && (
         <button
           onClick={scrollToFirstUnread}
@@ -191,11 +197,12 @@ export const MessagesArea: React.FC<{
       {/* Список повідомлень */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900 scrollbar-thin flex flex-col-reverse"
+        className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900 scrollbar-thin"
       >
-        <div className="flex flex-col">
+        <div className="max-w-4xl mx-auto">
           {visibleMessages.map((msg, i) => {
-            const showAvatar = i === 0 || visibleMessages[i - 1].isOutgoing !== msg.isOutgoing;
+            const prevMsg = visibleMessages[i - 1];
+            const showAvatar = !prevMsg || prevMsg.isOutgoing !== msg.isOutgoing;
             const isUnread = !msg.isRead;
 
             return (
@@ -217,7 +224,13 @@ export const MessagesArea: React.FC<{
             );
           })}
         </div>
-        <div ref={loadMoreRef} style={{ height: '10px' }} />
+
+        {/* Тригер для підвантаження */}
+        {visibleCount < messages.length && (
+          <div ref={loadMoreRef} className="h-10 flex items-center justify-center">
+            <span className="text-sm text-gray-500">Завантаження...</span>
+          </div>
+        )}
       </div>
     </div>
   );
