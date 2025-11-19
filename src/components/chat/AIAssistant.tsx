@@ -1,9 +1,10 @@
 // src/components/AIAssistant.tsx
+
 import { Bot, Send, X, Sparkles, AlertTriangle, FileText } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
-import { AIMessage, Message } from './types';
+import { AIMessage } from './types';
 import { useMessageContext } from '../../context/MessageContext';
 
 export const AIAssistant: React.FC<{
@@ -16,9 +17,8 @@ export const AIAssistant: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Скасування запиту
-  const cancelTokenRef = useRef<AbortController | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const retryCountRef = useRef(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -28,11 +28,10 @@ export const AIAssistant: React.FC<{
     scrollToBottom();
   }, [aiMessages, streamingText]);
 
-  // Очищення при закритті
   useEffect(() => {
     return () => {
-      if (cancelTokenRef.current) {
-        cancelTokenRef.current.abort('Компонент розмонтовано');
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
   }, []);
@@ -53,167 +52,197 @@ export const AIAssistant: React.FC<{
     ]);
   };
 
-  const streamOllamaResponse = async (prompt: string) => {
-    setStreamingText('');
-    let accumulatedText = '';
-    let buffer = '';
-
-    // Скасовуємо попередній запит, якщо є
-    if (cancelTokenRef.current) {
-      cancelTokenRef.current.abort('Новий запит');
+  const streamResponse = async (prompt: string, retryAttempt = 0) => {
+    // Скасовуємо попередній запит
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
 
     const controller = new AbortController();
-    cancelTokenRef.current = controller;
+    abortControllerRef.current = controller;
 
-    const timeoutId = setTimeout(() => {
-      controller.abort('Таймаут запиту');
-    }, 180000); // 3 хвилини
+    setStreamingText('');
+    let accumulatedText = '';
+    let lastActivityTime = Date.now();
 
     try {
-      console.log('Відправляємо запит до Ollama...');
-      console.log('Prompt:', prompt.substring(0, 200) + '...');
-
-      const response = await fetch('/api/generate', {
+      const apiUrl = window.location.origin + '/generate/stream';
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
         },
         body: JSON.stringify({
-          model: 'llama3',
-          prompt: prompt,
+          model: 'Llama-3.2-3B-Instruct-Q4_K_M',
+          prompt,
           stream: true,
+          temperature: 0.7,
+          max_tokens: 2048,
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text().catch(() => 'Невідома помилка');
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
       if (!response.body) {
-        throw new Error('No response body');
+        throw new Error('Відповідь не містить body');
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      // Таймаут на бездіяльність (60 секунд)
+      const inactivityTimeout = setInterval(() => {
+        if (Date.now() - lastActivityTime > 600000) {
+          clearInterval(inactivityTimeout);
+          controller.abort();
+        }
+      }, 1000);
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        
+        if (done) {
+          clearInterval(inactivityTimeout);
+          break;
+        }
 
+        lastActivityTime = Date.now();
         buffer += decoder.decode(value, { stream: true });
-
+        
+        // Обробляємо всі повні рядки в буфері
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = lines.pop() || ''; // Зберігаємо неповний рядок
 
         for (const line of lines) {
           const trimmedLine = line.trim();
-          if (trimmedLine) {
-            try {
-              const json = JSON.parse(trimmedLine);
-              if (json.response) {
-                accumulatedText += json.response;
-                setStreamingText(accumulatedText);
-              }
-              if (json.done) {
-                // Опціонально: можна завершити, але продовжуємо читати
-              }
-            } catch (e) {
-              console.warn('Помилка парсингу рядка:', line);
+          
+          // Пропускаємо порожні рядки та heartbeat коментарі
+          if (!trimmedLine || trimmedLine.startsWith(':')) continue;
+          
+          if (!trimmedLine.startsWith('data: ')) continue;
+
+          const data = trimmedLine.slice(6).trim();
+          if (!data || data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+
+            if (parsed.error) {
+              clearInterval(inactivityTimeout);
+              throw new Error(parsed.error);
             }
+
+            if (parsed.text) {
+              accumulatedText += parsed.text;
+              setStreamingText(accumulatedText);
+            }
+
+            if (parsed.done) {
+              clearInterval(inactivityTimeout);
+              if (accumulatedText.trim()) {
+                addMessage('assistant', accumulatedText.trim());
+              }
+              setStreamingText('');
+              setIsLoading(false);
+              retryCountRef.current = 0;
+              return;
+            }
+          } catch (parseError) {
+            console.warn('Не вдалося розпарсити JSON:', data, parseError);
           }
         }
       }
 
-      // Обробити залишок буфера після завершення
-      const finalFlush = decoder.decode();
-      if (finalFlush) {
-        buffer += finalFlush;
+      // Якщо цикл завершився, але є накопичений текст
+      if (accumulatedText.trim()) {
+        addMessage('assistant', accumulatedText.trim());
+      } else if (!controller.signal.aborted) {
+        addMessage('assistant', 'Відповідь не отримано. Спробуйте ще раз.');
       }
-      if (buffer.trim()) {
-        try {
-          const json = JSON.parse(buffer);
-          if (json.response) {
-            accumulatedText += json.response;
-            setStreamingText(accumulatedText);
-          }
-        } catch (e) {
-          console.warn('Помилка парсингу фінального буфера:', buffer);
-        }
-      }
-    } catch (error) {
-      let errorMessage = 'Помилка з’єднання з Ollama. Перевірте, чи запущено сервер.';
-      if (error.name === 'AbortError') {
-        console.log('Запит скасовано:', error.message);
-        if (error.message === 'Таймаут запиту') {
-          errorMessage = 'Таймаут запиту. Ollama не відповідає.';
-        } else if (error.message !== 'Новий запит' && error.message !== 'Компонент розмонтовано') {
-          errorMessage = 'Запит скасовано через таймаут або вручну.';
+
+    } catch (err: any) {
+      console.error('Помилка стрімінгу:', err);
+      
+      if (err.name === 'AbortError') {
+        if (accumulatedText.trim()) {
+          addMessage('assistant', accumulatedText.trim() + '\n\n[Запит скасовано]');
         } else {
-          // Для 'Новий запит' або 'Компонент розмонтовано' не встановлюємо помилку
-          return;
+          addMessage('assistant', 'Запит скасовано або таймаут (60 сек).');
+        }
+      } else if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        // Проблема з мережею - пробуємо повторити
+        if (retryAttempt < 2) {
+          console.log(`Повторна спроба ${retryAttempt + 1}/2...`);
+          retryCountRef.current = retryAttempt + 1;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return streamResponse(prompt, retryAttempt + 1);
+        } else {
+          addMessage('assistant', 'Помилка з\'єднання. Перевірте:\n• Чи запущений сервер\n• Чи правильний URL API\n• Налаштування CORS');
         }
       } else {
-        console.error('Помилка Ollama:', error);
+        addMessage('assistant', `Помилка: ${err.message || 'Немає з\'єднання з сервером'}`);
       }
-      accumulatedText = errorMessage;
     } finally {
-      clearTimeout(timeoutId);
-      // Завершуємо потік
-      if (accumulatedText.trim()) {
-        const final: AIMessage = {
-          id: `ai-${Date.now()}`,
-          role: 'assistant',
-          content: accumulatedText,
-          timestamp: new Date(),
-        };
-        setAiMessages(prev => [...prev, final]);
-      }
-
+      setIsLoading(false);
       setStreamingText('');
-      cancelTokenRef.current = null;
+      abortControllerRef.current = null;
     }
   };
 
   const analyze = async (type: 'all' | 'new' | 'selected') => {
-    let target: Message[] = [];
+    let target = currentMessages;
 
     if (type === 'new')
       target = currentMessages.filter(m => !m.isOutgoing && !m.isRead);
     else if (type === 'selected')
       target = currentMessages.filter(m => state.selectedMessageIds.has(m.id));
-    else target = currentMessages;
 
     if (target.length === 0) {
       addMessage('assistant', 'Немає повідомлень для аналізу.');
       return;
     }
 
+    // Захист від переповнення контексту
+    if (target.length > 120) {
+      addMessage('assistant', `Занадто багато повідомлень (${target.length}). Аналізую лише останні 100.`);
+      target = target.slice(-100);
+    }
+
     const userMsg: AIMessage = {
       id: `ai-${Date.now()}`,
       role: 'user',
-      content: `Проаналізуй ${type === 'new' ? 'нові' : type === 'selected' ? 'вибрані' : 'всі'} повідомлення (${target.length})`,
+      content: `Аналізую ${type === 'new' ? 'нові' : type === 'selected' ? 'вибрані' : 'всі'} повідомлення (${target.length} шт.)`,
       timestamp: new Date(),
     };
     setAiMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
 
-    const prompt = `Проаналізуй наступні повідомлення з чату з акцентом на військову тематику: виявлення підготовки до дій, місць зберігання техніки, координації операцій, потенційних загроз тощо.
+    const prompt = `Ти — військовий аналітик. Проаналізуй повідомлення з чату.
 
-Вияви та покажи конкретні повідомлення (з номерами та цитатами), які стосуються цієї тематики.
-Надати статистику (вхідні, непрочитані, термінові — ключові слова: "терміново", "негайно", "операція", "збір").
-Визнач основні теми, підтеми та рекомендації.
+Звертай особливу увагу на:
+• підготовку до дій
+• місця зберігання техніки
+• координацію
+• термінові повідомлення (ключі: "терміново", "збір", "операція", "негайно")
+• переміщення, маршрути, координати
 
-Формат відповіді: markdown українською мовою.
+Формат відповіді — Markdown, українською.
 
 Повідомлення:
 ${target
-  .map((m, i) => `${i + 1}. ${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.content || '[медіа]'}`)
-  .join('\n')}`;
+  .map((m, i) => `${i + 1}. ${m.isOutgoing ? 'Я' : 'Співрозмовник'}: ${m.content || '[файл/фото]'}`)
+  .join('\n')}
 
-    await streamOllamaResponse(prompt);
-    setIsLoading(false);
+Висновок:`;
+
+    await streamResponse(prompt);
   };
 
   const sendCustom = async () => {
@@ -223,9 +252,9 @@ ${target
     setInputValue('');
     setIsLoading(true);
 
-    const context = currentMessages
-      .slice(-5)
-      .map(m => `${m.isOutgoing ? 'Я:' : 'Інший:'} ${m.content || '[медіа]'}`)
+    const recent = currentMessages.slice(-10);
+    const context = recent
+      .map(m => `${m.isOutgoing ? 'Я' : 'Співрозмовник'}: ${m.content || '[медіа]'}`)
       .join('\n');
 
     const prompt = `Контекст чату (останні повідомлення):
@@ -233,12 +262,9 @@ ${context}
 
 Запит користувача: ${inputValue}
 
-Аналізуй з акцентом на військову тематику: підготовка до дій, місця зберігання техніки, координація тощо.
-Якщо релевантно — покажи виявлені повідомлення.
-Відповідай виключно українською мовою, використовуючи markdown.`;
+Відповідай українською, чітко, у Markdown. Якщо є військова/оперативна інформація — виділи її.`;
 
-    await streamOllamaResponse(prompt);
-    setIsLoading(false);
+    await streamResponse(prompt);
   };
 
   if (!isOpen) return null;
@@ -251,6 +277,9 @@ ${context}
           <div className="flex items-center gap-3">
             <Sparkles className="w-7 h-7 text-purple-600" />
             <h2 className="text-xl font-bold">AI Асистент</h2>
+            {retryCountRef.current > 0 && (
+              <span className="text-xs text-yellow-600">Спроба {retryCountRef.current}/2</span>
+            )}
           </div>
           <IconButton icon={<X className="w-6 h-6" />} onClick={onClose} />
         </div>
@@ -260,32 +289,21 @@ ${context}
           <Button size="sm" onClick={() => analyze('new')} disabled={isLoading}>
             <AlertTriangle className="w-4 h-4 mr-1" /> Нові
           </Button>
-
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => analyze('selected')}
-            disabled={isLoading}
-          >
+          <Button size="sm" variant="secondary" onClick={() => analyze('selected')} disabled={isLoading}>
             Вибрані ({state.selectedMessageIds.size})
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => analyze('all')}
-            disabled={isLoading}
-          >
-            <FileText className="w-4 h-4 mr-1" /> Всі
+          <Button size="sm" variant="secondary" onClick={() => analyze('all')} disabled={isLoading}>
+            <FileText className="w-4 h-4 mr-1" /> Всі (останні 100)
           </Button>
         </div>
 
         {/* Повідомлення */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {aiMessages.length === 0 && !streamingText && (
+          {aiMessages.length === 0 && !streamingText && !isLoading && (
             <div className="text-center text-gray-500 mt-16">
               <Bot className="w-16 h-16 mx-auto mb-4 opacity-40" />
-              <p className="text-lg">Привіт! Я ваш AI-асистент.</p>
-              <p className="text-sm mt-2">Оберіть дію або напишіть запит.</p>
+              <p className="text-lg">Привіт! Я аналізую чат на військову тематику.</p>
+              <p className="text-sm mt-2">Натисни кнопку або напиши запит.</p>
             </div>
           )}
 
@@ -303,10 +321,7 @@ ${context}
               >
                 <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
                 <p className="text-xs opacity-70 mt-2">
-                  {msg.timestamp.toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
             </div>
@@ -316,6 +331,7 @@ ${context}
             <div className="flex justify-start">
               <div className="max-w-[85%] px-4 py-3 rounded-2xl bg-gray-100 dark:bg-gray-700">
                 <p className="whitespace-pre-wrap text-sm">{streamingText}</p>
+                <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse ml-1"></span>
               </div>
             </div>
           )}
@@ -323,9 +339,7 @@ ${context}
           {isLoading && !streamingText && (
             <div className="flex justify-start">
               <div className="bg-gray-100 dark:bg-gray-700 px-4 py-3 rounded-2xl">
-                <p className="text-sm">
-                  Аналізую...<span className="animate-pulse">...</span>
-                </p>
+                <p className="text-sm">Аналізую...<span className="animate-pulse">...</span></p>
               </div>
             </div>
           )}
@@ -341,14 +355,11 @@ ${context}
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendCustom()}
-              placeholder="Запитайте про чат..."
+              placeholder="Запитай про чат..."
               className="flex-1 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-600"
               disabled={isLoading}
             />
-            <Button
-              onClick={sendCustom}
-              disabled={isLoading || !inputValue.trim()}
-            >
+            <Button onClick={sendCustom} disabled={isLoading || !inputValue.trim()}>
               <Send className="w-5 h-5" />
             </Button>
           </div>
