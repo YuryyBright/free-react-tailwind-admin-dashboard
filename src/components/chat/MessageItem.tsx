@@ -1,3 +1,4 @@
+// src/components/chat/MessageItem.tsx
 import { Check, CheckCheck, Volume2, FileText, Image as ImageIcon, MoreVertical } from 'lucide-react';
 import { Message, MessageStatus } from './types';
 import { useState } from 'react';
@@ -13,8 +14,17 @@ export const MessageItem: React.FC<{
   isUnread?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (id: string) => void;
-  readonly: boolean;
-}> = ({ message, showAvatar, onStatusChange, onToggleBookmark, isUnread, isSelected, onToggleSelect }) => {
+  readOnly?: boolean;
+}> = ({ 
+  message, 
+  showAvatar, 
+  onStatusChange, 
+  onToggleBookmark, 
+  isUnread, 
+  isSelected, 
+  onToggleSelect,
+  readOnly = false 
+}) => {
   const [showMenu, setShowMenu] = useState(false);
   const isOutgoing = message.isOutgoing;
 
@@ -79,21 +89,23 @@ export const MessageItem: React.FC<{
         </div>
 
         {/* Кнопки закладки та меню */}
-        <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-          <IconButton
-            icon={message.isBookmarked ? <BookmarkCheck className="w-4 h-4 text-yellow-600" /> : <Bookmark className="w-4 h-4" />}
-            onClick={() => onToggleBookmark(message.id)}
-            className="bg-white dark:bg-gray-800 shadow-md"
-            title="Закладка"
-          />
-          <IconButton
-            icon={<MoreVertical className="w-4 h-4" />}
-            onClick={() => setShowMenu(!showMenu)}
-            className="bg-white dark:bg-gray-800 shadow-md"
-          />
-        </div>
+        {!readOnly && (
+          <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+            <IconButton
+              icon={message.isBookmarked ? <BookmarkCheck className="w-4 h-4 text-yellow-600" /> : <Bookmark className="w-4 h-4" />}
+              onClick={() => onToggleBookmark(message.id)}
+              className="bg-white dark:bg-gray-800 shadow-md"
+              title="Закладка"
+            />
+            <IconButton
+              icon={<MoreVertical className="w-4 h-4" />}
+              onClick={() => setShowMenu(!showMenu)}
+              className="bg-white dark:bg-gray-800 shadow-md"
+            />
+          </div>
+        )}
 
-        {showMenu && (
+        {showMenu && !readOnly && (
           <div className={`absolute ${isOutgoing ? 'left-0' : 'right-0'} top-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-2 z-10 min-w-max`}>
             {(['interesting', 'prepared', 'considered'] as const).map((s) => {
               const cfg = statusConfig[s];

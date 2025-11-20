@@ -1,4 +1,4 @@
-// src/components/MessagesArea.tsx
+// src/components/chat/MessagesArea.tsx
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { MessageItem } from './MessageItem';
 import { Message } from './types';
@@ -26,7 +26,7 @@ export const MessagesArea: React.FC<{
   const firstUnreadIndex = messages.findIndex(m => !m.isRead);
   const hasScrolledToUnread = useRef(false);
 
-  // === Визначаємо, скільки завантажити при першому відкритті ===
+  // Визначаємо, скільки завантажити при першому відкритті
   useLayoutEffect(() => {
     if (messages.length === 0) return;
 
@@ -42,7 +42,7 @@ export const MessagesArea: React.FC<{
     }
   }, [messages.length, selectedChatId]);
 
-  // === Автоскрол до першого непрочитаного ===
+  // Автоскрол до першого непрочитаного
   useLayoutEffect(() => {
     if (hasScrolledToUnread.current || !scrollRef.current) return;
 
@@ -68,7 +68,7 @@ export const MessagesArea: React.FC<{
     }
   };
 
-  // === Напрямок скролу (звичайний: вгору = менше scrollTop) ===
+  // Напрямок скролу (звичайний: вгору = менше scrollTop)
   const lastScrollTop = useRef(0);
   const isScrollingDown = useRef(true);
 
@@ -84,7 +84,7 @@ export const MessagesArea: React.FC<{
     return () => el?.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // === IntersectionObserver: читаємо ТІЛЬКИ при скролі вниз або при першому відкритті ===
+  // IntersectionObserver: читаємо ТІЛЬКИ при скролі вниз або при першому відкритті
   useEffect(() => {
     if (!selectedChatId || unreadIds.length === 0 || readOnly) return;
 
@@ -119,7 +119,7 @@ export const MessagesArea: React.FC<{
     return () => observer.disconnect();
   }, [unreadIds, selectedChatId, dispatch, readOnly]);
 
-  // === Плаваюча кнопка "вниз" ===
+  // Плаваюча кнопка "вниз"
   useEffect(() => {
     const handleScroll = () => {
       if (!scrollRef.current) return;
@@ -132,7 +132,7 @@ export const MessagesArea: React.FC<{
     return () => scrollRef.current?.removeEventListener('scroll', handleScroll);
   }, [unreadIds.length]);
 
-  // === Infinite scroll: підвантаження старих ===
+  // Infinite scroll: підвантаження старих
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -148,7 +148,7 @@ export const MessagesArea: React.FC<{
     return () => observer.disconnect();
   }, [visibleCount, messages.length]);
 
-  // === Збереження позиції при підвантаженні ===
+  // Збереження позиції при підвантаженні
   useLayoutEffect(() => {
     if (!scrollRef.current || visibleCount <= INITIAL_LOAD || prevHeightRef.current === 0) return;
 
@@ -162,6 +162,21 @@ export const MessagesArea: React.FC<{
     dispatch({
       type: 'MARK_AS_READ',
       payload: { chatId: selectedChatId, messageIds: unreadIds },
+    });
+  };
+
+  // Callback'и для MessageItem
+  const handleStatusChange = (id: string, status: any) => {
+    dispatch({
+      type: 'UPDATE_MESSAGE_STATUS',
+      payload: { id, status },
+    });
+  };
+
+  const handleToggleBookmark = (id: string) => {
+    dispatch({
+      type: 'TOGGLE_BOOKMARK',
+      payload: id,
     });
   };
 
@@ -215,9 +230,10 @@ export const MessagesArea: React.FC<{
                   message={msg}
                   showAvatar={showAvatar}
                   isUnread={isUnread}
-                  isSelected={false}
-                  onToggleSelect={() => {}}
-                  onToggleBookmark={() => {}}
+                  isSelected={state.selectedMessageIds.has(msg.id)}
+                  onToggleSelect={(id) => dispatch({ type: 'TOGGLE_MESSAGE', payload: id })}
+                  onStatusChange={handleStatusChange}
+                  onToggleBookmark={handleToggleBookmark}
                   readOnly={readOnly}
                 />
               </div>

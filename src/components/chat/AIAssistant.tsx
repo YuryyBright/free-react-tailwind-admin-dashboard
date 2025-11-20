@@ -1,17 +1,67 @@
-// src/components/AIAssistant.tsx
+// src/components/chat/AIAssistant.tsx
 
 import { Bot, Send, X, Sparkles, AlertTriangle, FileText } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { Button } from './ui/Button';
-import { IconButton } from './ui/IconButton';
-import { AIMessage } from './types';
-import { useMessageContext } from '../../context/MessageContext';
+import { Message, MessageStatus } from './types';
 
-export const AIAssistant: React.FC<{
+interface AIMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
+interface AIAssistantProps {
   isOpen: boolean;
   onClose: () => void;
-}> = ({ isOpen, onClose }) => {
-  const { state } = useMessageContext();
+  messages: Message[];
+  selectedMessageIds: Set<string>;
+}
+
+// Кнопка
+const Button: React.FC<{
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  size?: 'sm' | 'md';
+  variant?: 'primary' | 'secondary';
+}> = ({ children, onClick, disabled, size = 'md', variant = 'primary' }) => {
+  const baseClasses = 'rounded-xl font-medium transition flex items-center justify-center';
+  const sizeClasses = size === 'sm' ? 'px-3 py-1.5 text-sm' : 'px-4 py-2';
+  const variantClasses = variant === 'primary'
+    ? 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400'
+    : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600';
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`${baseClasses} ${sizeClasses} ${variantClasses} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+    >
+      {children}
+    </button>
+  );
+};
+
+// Іконка кнопка
+const IconButton: React.FC<{
+  icon: React.ReactNode;
+  onClick: () => void;
+}> = ({ icon, onClick }) => (
+  <button
+    onClick={onClick}
+    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+  >
+    {icon}
+  </button>
+);
+
+export const AIAssistant: React.FC<AIAssistantProps> = ({
+  isOpen,
+  onClose,
+  messages,
+  selectedMessageIds,
+}) => {
   const [aiMessages, setAiMessages] = useState<AIMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,9 +86,8 @@ export const AIAssistant: React.FC<{
     };
   }, []);
 
-  const currentMessages = state.selectedChatId
-    ? state.messages[state.selectedChatId] || []
-    : [];
+  // Отримуємо поточні повідомлення
+  const currentMessages = messages || [];
 
   const addMessage = (role: 'user' | 'assistant', content: string) => {
     setAiMessages(prev => [
@@ -53,7 +102,6 @@ export const AIAssistant: React.FC<{
   };
 
   const streamResponse = async (prompt: string, retryAttempt = 0) => {
-    // Скасовуємо попередній запит
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -97,9 +145,8 @@ export const AIAssistant: React.FC<{
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
-      // Таймаут на бездіяльність (60 секунд)
       const inactivityTimeout = setInterval(() => {
-        if (Date.now() - lastActivityTime > 600000) {
+        if (Date.now() - lastActivityTime > 60000) {
           clearInterval(inactivityTimeout);
           controller.abort();
         }
@@ -116,16 +163,13 @@ export const AIAssistant: React.FC<{
         lastActivityTime = Date.now();
         buffer += decoder.decode(value, { stream: true });
         
-        // Обробляємо всі повні рядки в буфері
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Зберігаємо неповний рядок
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           const trimmedLine = line.trim();
           
-          // Пропускаємо порожні рядки та heartbeat коментарі
           if (!trimmedLine || trimmedLine.startsWith(':')) continue;
-          
           if (!trimmedLine.startsWith('data: ')) continue;
 
           const data = trimmedLine.slice(6).trim();
@@ -155,12 +199,11 @@ export const AIAssistant: React.FC<{
               return;
             }
           } catch (parseError) {
-            console.warn('Не вдалося розпарсити JSON:', data, parseError);
+            console.warn('Не вдалось розпарсити JSON:', data, parseError);
           }
         }
       }
 
-      // Якщо цикл завершився, але є накопичений текст
       if (accumulatedText.trim()) {
         addMessage('assistant', accumulatedText.trim());
       } else if (!controller.signal.aborted) {
@@ -177,7 +220,6 @@ export const AIAssistant: React.FC<{
           addMessage('assistant', 'Запит скасовано або таймаут (60 сек).');
         }
       } else if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
-        // Проблема з мережею - пробуємо повторити
         if (retryAttempt < 2) {
           console.log(`Повторна спроба ${retryAttempt + 1}/2...`);
           retryCountRef.current = retryAttempt + 1;
@@ -196,13 +238,31 @@ export const AIAssistant: React.FC<{
     }
   };
 
+  // Форматування повідомлення для аналізу
+  const formatMessage = (m: Message): string => {
+    const sender = m.isOutgoing ? 'Я' : 'Співрозмовник';
+    
+    if (m.type === 'text') {
+      return `${sender}: ${m.content || ''}`;
+    } else if (m.type === 'image') {
+      return `${sender}: [Зображення${m.caption ? ': ' + m.caption : ''}]`;
+    } else if (m.type === 'document') {
+      return `${sender}: [Документ: ${m.fileName || 'файл'}]`;
+    } else if (m.type === 'voice') {
+      return `${sender}: [Голосове повідомлення ${m.duration || 0}s]`;
+    }
+    
+    return `${sender}: [медіа]`;
+  };
+
   const analyze = async (type: 'all' | 'new' | 'selected') => {
     let target = currentMessages;
 
-    if (type === 'new')
+    if (type === 'new') {
       target = currentMessages.filter(m => !m.isOutgoing && !m.isRead);
-    else if (type === 'selected')
-      target = currentMessages.filter(m => state.selectedMessageIds.has(m.id));
+    } else if (type === 'selected') {
+      target = currentMessages.filter(m => selectedMessageIds.has(m.id));
+    }
 
     if (target.length === 0) {
       addMessage('assistant', 'Немає повідомлень для аналізу.');
@@ -230,15 +290,14 @@ export const AIAssistant: React.FC<{
 • підготовку до дій
 • місця зберігання техніки
 • координацію
-• термінові повідомлення (ключі: "терміново", "збір", "операція", "негайно")
 • переміщення, маршрути, координати
+• згадки про обладнання, зброю, техніку
+• часові мітки важливих подій
 
 Формат відповіді — Markdown, українською.
 
 Повідомлення:
-${target
-  .map((m, i) => `${i + 1}. ${m.isOutgoing ? 'Я' : 'Співрозмовник'}: ${m.content || '[файл/фото]'}`)
-  .join('\n')}
+${target.map((m, i) => `${i + 1}. ${formatMessage(m)}`).join('\n')}
 
 Висновок:`;
 
@@ -253,9 +312,7 @@ ${target
     setIsLoading(true);
 
     const recent = currentMessages.slice(-10);
-    const context = recent
-      .map(m => `${m.isOutgoing ? 'Я' : 'Співрозмовник'}: ${m.content || '[медіа]'}`)
-      .join('\n');
+    const context = recent.map(m => formatMessage(m)).join('\n');
 
     const prompt = `Контекст чату (останні повідомлення):
 ${context}
@@ -290,7 +347,7 @@ ${context}
             <AlertTriangle className="w-4 h-4 mr-1" /> Нові
           </Button>
           <Button size="sm" variant="secondary" onClick={() => analyze('selected')} disabled={isLoading}>
-            Вибрані ({state.selectedMessageIds.size})
+            Вибрані ({selectedMessageIds.size})
           </Button>
           <Button size="sm" variant="secondary" onClick={() => analyze('all')} disabled={isLoading}>
             <FileText className="w-4 h-4 mr-1" /> Всі (останні 100)
