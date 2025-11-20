@@ -259,7 +259,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
     let target = currentMessages;
 
     if (type === 'new') {
-      target = currentMessages.filter(m => !m.isOutgoing && !m.isRead);
+      target = currentMessages.filter(m => !m.isRead);
     } else if (type === 'selected') {
       target = currentMessages.filter(m => selectedMessageIds.has(m.id));
     }
